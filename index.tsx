@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 /* tslint:disable */
 /**
  * @license
@@ -21,6 +22,7 @@ import {
   type CostBreakdown,
 } from "./utils";
 import "./visual-3d";
+import audioProcessorUrl from "./audio-processor.ts?url";
 
 interface AppMetadata {
   requestFramePermissions?: string[];
@@ -416,9 +418,7 @@ export class GdmLiveAudio extends LitElement {
       );
 
       try {
-        await this.inputAudioContext.audioWorklet.addModule(
-          "public/audio-processor.js"
-        );
+        await this.inputAudioContext.audioWorklet.addModule(audioProcessorUrl);
       } catch (e) {
         this.updateError(`Failed to load audio processor: ${e}`);
         this.stopRecording();
