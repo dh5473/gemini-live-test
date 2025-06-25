@@ -1,0 +1,6 @@
+{
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "systemInstructionFile": "prompt/night.txt"
+}
