@@ -4,14 +4,14 @@
  */
 import { Blob } from "@google/genai";
 
-// Gemini 모델 타입 정의
+// Defines the Gemini model types
 enum GeminiModel {
   GEMINI_2_5_FLASH_PREVIEW_NATIVE_AUDIO = "gemini-2.5-flash-preview-native-audio-dialog",
   GEMINI_LIVE_2_5_FLASH_PREVIEW = "gemini-live-2.5-flash-preview",
   GEMINI_2_0_FLASH_LIVE_001 = "gemini-2.0-flash-live-001",
 }
 
-// Live API 가격 정보 (USD per 1M tokens)
+// Live API pricing information (USD per 1M tokens)
 const GEMINI_PRICE_RATIO = {
   [GeminiModel.GEMINI_2_5_FLASH_PREVIEW_NATIVE_AUDIO]: {
     input: {
@@ -66,7 +66,7 @@ interface CostBreakdown {
 }
 
 /**
- * 토큰 세부사항에서 텍스트와 오디오 토큰 수를 추출합니다.
+ * Extracts the number of text and audio tokens from token details.
  */
 function extractTokensByModality(
   tokensDetails?: TokenDetail[]
@@ -86,13 +86,13 @@ function extractTokensByModality(
 }
 
 /**
- * Gemini API 응답의 비용을 계산합니다.
+ * Calculates the cost of a Gemini API response.
  */
 function calculateCostInDollar(
   model: string,
   tokenUsage: TokenUsage
 ): CostBreakdown {
-  // 모델명을 enum으로 변환
+  // Convert model name to enum
   let geminiModel: GeminiModel;
   if (model === GeminiModel.GEMINI_2_5_FLASH_PREVIEW_NATIVE_AUDIO) {
     geminiModel = GeminiModel.GEMINI_2_5_FLASH_PREVIEW_NATIVE_AUDIO;
@@ -102,16 +102,16 @@ function calculateCostInDollar(
     geminiModel = GeminiModel.GEMINI_2_0_FLASH_LIVE_001;
   }
 
-  // 입력 토큰
+  // Input tokens
   const [inputTextTokens, inputAudioTokens] = extractTokensByModality(
     tokenUsage.prompt_tokens_details
   );
-  // 출력 토큰
+  // Output tokens
   const [outputTextTokens, outputAudioTokens] = extractTokensByModality(
     tokenUsage.response_tokens_details
   );
 
-  // 가격 정보
+  // Pricing info
   const price = GEMINI_PRICE_RATIO[geminiModel];
 
   const inputCost =
@@ -133,12 +133,12 @@ function calculateCostInDollar(
 }
 
 /**
- * 오디오 데이터 크기를 기반으로 대략적인 토큰 수를 추정합니다.
- * (실제 토큰 수는 API 응답에서 확인해야 합니다)
+ * Estimates the number of tokens based on the audio data size.
+ * (The actual token count should be confirmed from the API response)
  */
 function estimateAudioTokens(audioDataSize: number): number {
-  // 대략적인 추정: 1초당 약 75토큰 (16kHz 기준)
-  // 실제로는 더 정확한 계산이 필요할 수 있습니다
+  // Approximate estimation: about 75 tokens per second (based on 16kHz)
+  // A more precise calculation may be needed in practice
   const approximateSecondsPerByte = 1 / (16000 * 2); // 16kHz, 16bit
   const seconds = audioDataSize * approximateSecondsPerByte;
   return Math.ceil(seconds * 75);

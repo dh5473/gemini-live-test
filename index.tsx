@@ -58,7 +58,7 @@ export class GdmLiveAudio extends LitElement {
   // private modelName = "gemini-2.5-flash-preview-native-audio-dialog";
 
   /**
-   * WebSocket 연결 상태 체크 함수
+   * Checks the WebSocket connection status.
    */
   private isWebSocketOpen(): boolean {
     try {
@@ -69,27 +69,27 @@ export class GdmLiveAudio extends LitElement {
         (this.session.conn as any).ws.readyState === WebSocket.OPEN
       );
     } catch (error) {
-      console.warn("WebSocket 상태 체크 오류:", error);
+      console.warn("Error checking WebSocket state:", error);
       return false;
     }
   }
 
   /**
-   * WebSocket 재연결 시도
+   * Attempts to reconnect the WebSocket.
    */
   private async reconnectWebSocket(): Promise<void> {
-    console.log("WebSocket 재연결 시도 중...");
-    this.updateStatus("연결 재시도 중...");
+    console.log("Attempting to reconnect WebSocket...");
+    this.updateStatus("Reconnecting...");
 
     try {
       if (this.session) {
         this.session.close();
       }
       await this.initSession();
-      this.updateStatus("연결 복구됨");
+      this.updateStatus("Connection restored.");
     } catch (error) {
-      console.error("재연결 실패:", error);
-      this.updateError("연결 재시도 실패. 리셋 버튼을 눌러주세요.");
+      console.error("Reconnection failed:", error);
+      this.updateError("Failed to reconnect. Please press the reset button.");
     }
   }
 
@@ -212,12 +212,12 @@ export class GdmLiveAudio extends LitElement {
       if (response.ok) {
         const metadata: any = await response.json();
         if (metadata.systemInstructionFile) {
-          // systemInstructionFile이 있으면 해당 파일을 fetch해서 사용
+          // If systemInstructionFile exists, fetch and use that file
           const promptRes = await fetch(metadata.systemInstructionFile);
           if (promptRes.ok) {
             this.systemInstruction = await promptRes.text();
           } else {
-            console.warn("프롬프트 파일을 불러올 수 없습니다.");
+            console.warn("Could not load the prompt file.");
           }
         } else if (metadata.systemInstruction) {
           this.systemInstruction = metadata.systemInstruction;
@@ -242,7 +242,7 @@ export class GdmLiveAudio extends LitElement {
 
   private async initSession() {
     const sessionConfig: any = {
-      responseModalities: [Modality.AUDIO], // 오디오만 설정
+      responseModalities: [Modality.AUDIO], // Set to audio only
       speechConfig: {
         voiceConfig: { prebuiltVoiceConfig: { voiceName: "leda" } },
       },
@@ -253,21 +253,21 @@ export class GdmLiveAudio extends LitElement {
       sessionConfig.systemInstruction = this.systemInstruction;
     }
 
-    console.log("🚀 세션 초기화 시작, 모델:", this.modelName);
-    console.log("📋 설정:", sessionConfig);
+    console.log("🚀 Initializing session, model:", this.modelName);
+    console.log("📋 Config:", sessionConfig);
 
     try {
       this.session = await this.client.live.connect({
         model: this.modelName,
         callbacks: {
           onopen: () => {
-            console.log("✅ WebSocket 연결 성공");
-            this.updateStatus("연결됨");
+            console.log("✅ WebSocket connection successful");
+            this.updateStatus("Connected");
           },
           onmessage: async (message: LiveServerMessage) => {
-            // 사용량 메타데이터 출력 및 비용 계산
+            // Print usage metadata and calculate cost
             if (message.usageMetadata) {
-              console.log("💰 사용량 메타데이터:", message.usageMetadata);
+              console.log("💰 Usage metadata:", message.usageMetadata);
 
               const promptTokensDetails = (
                 message.usageMetadata.promptTokensDetails || []
@@ -286,7 +286,7 @@ export class GdmLiveAudio extends LitElement {
                 response_tokens_details: responseTokensDetails,
               };
 
-              // 비용 계산
+              // Calculate cost
               const costBreakdown = calculateCostInDollar(
                 this.modelName,
                 tokenUsage
@@ -295,12 +295,12 @@ export class GdmLiveAudio extends LitElement {
               this.sessionCostTotal += costBreakdown.total_cost;
             }
 
-            // 오디오 응답 처리
+            // Process audio response
             const parts = message.serverContent?.modelTurn?.parts || [];
             let hasAudio = false;
 
             for (const part of parts) {
-              // 오디오 응답 처리
+              // Process audio response
               if (part.inlineData && part.inlineData.data) {
                 hasAudio = true;
 
@@ -328,23 +328,23 @@ export class GdmLiveAudio extends LitElement {
               }
             }
 
-            // 오디오 전사(transcription) 처리
+            // Process audio transcription
             if (message.serverContent?.outputTranscription?.text) {
               this.textResponses = [
                 ...this.textResponses,
                 message.serverContent.outputTranscription.text,
               ];
               this.updateStatus(
-                `오디오 전사: ${message.serverContent.outputTranscription.text}`
+                `Transcription: ${message.serverContent.outputTranscription.text}`
               );
             }
 
-            // 응답 타입 로깅 및 저장
+            // Log and save response type
             if (hasAudio) {
               this.lastResponseType = message.serverContent?.outputTranscription
                 ?.text
-                ? "오디오 + 전사"
-                : "오디오만";
+                ? "Audio + Transcription"
+                : "Audio Only";
             }
 
             const interrupted = message.serverContent?.interrupted;
@@ -357,21 +357,21 @@ export class GdmLiveAudio extends LitElement {
             }
           },
           onerror: (e: ErrorEvent) => {
-            console.error("❌ WebSocket 오류:", e);
+            console.error("❌ WebSocket error:", e);
             this.updateError(e.message);
           },
           onclose: (e: CloseEvent) => {
-            console.log("🔌 WebSocket 연결 종료:", e.code, e.reason);
-            this.updateStatus("연결 종료:" + e.reason);
+            console.log("🔌 WebSocket connection closed:", e.code, e.reason);
+            this.updateStatus("Connection closed: " + e.reason);
           },
         },
         config: sessionConfig,
       });
 
-      console.log("✅ Live 세션 생성 완료");
+      console.log("✅ Live session created successfully");
     } catch (e: any) {
-      console.error("❌ 세션 초기화 실패:", e);
-      this.updateError(`세션 초기화 실패: ${e.message}`);
+      console.error("❌ Session initialization failed:", e);
+      this.updateError(`Session initialization failed: ${e.message}`);
     }
   }
 
@@ -387,10 +387,10 @@ export class GdmLiveAudio extends LitElement {
   private async startRecording() {
     this.error = "";
     if (!this.isWebSocketOpen()) {
-      this.updateStatus("WebSocket이 닫혀있습니다. 다시 연결합니다...");
+      this.updateStatus("WebSocket is closed. Reconnecting...");
       await this.reconnectWebSocket();
     }
-    this.updateStatus("녹음 시작...");
+    this.updateStatus("Starting recording...");
     try {
       if (this.inputAudioContext.state === "suspended") {
         await this.inputAudioContext.resume();
@@ -409,7 +409,7 @@ export class GdmLiveAudio extends LitElement {
       });
       this.isRecording = true;
       this.recordingStartTime = Date.now();
-      this.updateStatus("마이크 입력을 기다리는 중...");
+      this.updateStatus("Waiting for microphone input...");
 
       this.sourceNode = this.inputAudioContext.createMediaStreamSource(
         this.mediaStream
@@ -417,10 +417,10 @@ export class GdmLiveAudio extends LitElement {
 
       try {
         await this.inputAudioContext.audioWorklet.addModule(
-          "audio-processor.js"
+          "public/audio-processor.js"
         );
       } catch (e) {
-        this.updateError(`오디오 프로세서 로딩 실패: ${e}`);
+        this.updateError(`Failed to load audio processor: ${e}`);
         this.stopRecording();
         return;
       }
@@ -446,9 +446,9 @@ export class GdmLiveAudio extends LitElement {
         try {
           (this.session as any).sendRealtimeInput({ media: audioBlob });
         } catch (error) {
-          console.warn("WebSocket 전송 실패:", error);
+          console.warn("WebSocket send failed:", error);
           this.stopRecording();
-          this.reconnectWebSocket(); // 오류 시 재연결 시도
+          this.reconnectWebSocket(); // Attempt to reconnect on error
         }
 
         const now = Date.now();
@@ -459,12 +459,12 @@ export class GdmLiveAudio extends LitElement {
       this.sourceNode.connect(this.audioWorkletNode);
       this.sourceNode.connect(this.inputNode);
     } catch (e) {
-      this.updateError(`마이크 시작 오류: ${e}`);
+      this.updateError(`Microphone start error: ${e}`);
     }
   }
 
   private stopRecording() {
-    this.updateStatus("녹음 중지.");
+    this.updateStatus("Recording stopped.");
     this.isRecording = false;
     this.recordingStartTime = null;
 
@@ -483,12 +483,12 @@ export class GdmLiveAudio extends LitElement {
   }
 
   private async reset() {
-    this.updateStatus("리셋 중...");
+    this.updateStatus("Resetting...");
     this.stopRecording(); // Ensure recording is stopped before resetting
     if (this.session) {
       this.session.close();
     }
-    // 비용 정보 및 응답 기록 리셋
+    // Reset cost info and response history
     this.costInfo = null;
     this.sessionCostTotal = 0;
     this.estimatedInputTokens = 0;
@@ -499,18 +499,18 @@ export class GdmLiveAudio extends LitElement {
     // Re-fetch system instruction if needed, or rely on stored one.
     // For simplicity, we re-initialize the session which will use the already fetched instruction.
     await this.initSession();
-    this.updateStatus("세션이 초기화되었습니다.");
+    this.updateStatus("Session has been reset.");
   }
 
   render() {
     return html`
       <div>
-        <!-- 텍스트 응답 표시 -->
+        <!-- Display text responses -->
         ${this.textResponses.length > 0
           ? html`
               <div id="text-responses">
                 <div style="font-weight: bold; margin-bottom: 10px;">
-                  📝 오디오 전사 기록 (텍스트 + 오디오 동시 수신!)
+                  📝 Audio Transcription History (Audio + Text received!)
                 </div>
                 <div
                   style="font-size: 12px; color: #90EE90; margin-bottom: 10px;"
@@ -519,7 +519,7 @@ export class GdmLiveAudio extends LitElement {
                   (response, index) => html`
                     <div class="response-item">
                       <div class="response-type">
-                        전사 #${index + 1} (${this.lastResponseType})
+                        Transcription #${index + 1} (${this.lastResponseType})
                       </div>
                       <div>${response}</div>
                     </div>
@@ -529,43 +529,43 @@ export class GdmLiveAudio extends LitElement {
             `
           : html``}
 
-        <!-- 비용 정보 표시 -->
+        <!-- Display cost info -->
         <div id="cost-info">
-          <div style="font-weight: bold; margin-bottom: 8px;">💰 비용 정보</div>
+          <div style="font-weight: bold; margin-bottom: 8px;">💰 Cost Info</div>
           <div class="cost-row">
-            <span>녹음 시간:</span>
-            <span>${this.recordingDuration.toFixed(2)}초</span>
+            <span>Recording Time:</span>
+            <span>${this.recordingDuration.toFixed(2)}s</span>
           </div>
           ${this.costInfo
             ? html`
                 <div class="cost-row">
-                  <span>입력 비용:</span>
+                  <span>Input Cost:</span>
                   <span>$${this.costInfo.input_cost.toFixed(6)}</span>
                 </div>
                 <div class="cost-row">
-                  <span>출력 비용:</span>
+                  <span>Output Cost:</span>
                   <span>$${this.costInfo.output_cost.toFixed(6)}</span>
                 </div>
                 <div class="cost-row">
-                  <span>최근 요청:</span>
+                  <span>Last Request:</span>
                   <span>$${this.costInfo.total_cost.toFixed(6)}</span>
                 </div>
                 <div class="cost-row cost-total">
-                  <span>세션 총 비용:</span>
+                  <span>Total Session Cost:</span>
                   <span>$${this.sessionCostTotal.toFixed(6)}</span>
                 </div>
                 <div class="cost-row">
-                  <span>추정 입력 토큰:</span>
+                  <span>Est. Input Tokens:</span>
                   <span>${this.estimatedInputTokens}</span>
                 </div>
               `
             : html`
                 <div class="cost-row">
-                  <span>세션 총 비용:</span>
+                  <span>Total Session Cost:</span>
                   <span>$${this.sessionCostTotal.toFixed(6)}</span>
                 </div>
                 <div class="cost-row">
-                  <span>추정 입력 토큰:</span>
+                  <span>Est. Input Tokens:</span>
                   <span>${this.estimatedInputTokens}</span>
                 </div>
               `}
