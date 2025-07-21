@@ -41,6 +41,7 @@ export class GdmLiveAudio extends LitElement {
   @state() lastResponseType = "";
   @state() recordingStartTime: number | null = null;
   @state() recordingDuration: number = 0;
+  @state() selectedModel = "gemini-live-2.5-flash-preview";
 
   private client!: GoogleGenAI;
   private session!: Session;
@@ -56,8 +57,16 @@ export class GdmLiveAudio extends LitElement {
   private audioWorkletNode?: AudioWorkletNode;
   private sources = new Set<AudioBufferSourceNode>();
   private systemInstruction: string | undefined;
-  private modelName = "gemini-live-2.5-flash-preview";
-  // private modelName = "gemini-2.5-flash-preview-native-audio-dialog";
+  private modelOptions = [
+    {
+      value: "gemini-live-2.5-flash-preview",
+      label: "Gemini Live 2.5 Flash Preview",
+    },
+    {
+      value: "gemini-2.5-flash-preview-native-audio-dialog",
+      label: "Gemini 2.5 Flash Preview Native Audio",
+    },
+  ];
 
   /**
    * Checks the WebSocket connection status.
@@ -161,6 +170,34 @@ export class GdmLiveAudio extends LitElement {
       font-weight: bold;
     }
 
+    #model-selector {
+      position: absolute;
+      top: 2vh;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      padding: 10px;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+
+    #model-selector select {
+      background: rgba(255, 255, 255, 0.1);
+      color: white;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      border-radius: 4px;
+      padding: 5px 10px;
+      margin-left: 10px;
+      font-size: 14px;
+    }
+
+    #model-selector select option {
+      background: #333;
+      color: white;
+    }
+
     .controls {
       z-index: 10;
       position: absolute;
@@ -255,12 +292,12 @@ export class GdmLiveAudio extends LitElement {
       sessionConfig.systemInstruction = this.systemInstruction;
     }
 
-    console.log("🚀 Initializing session, model:", this.modelName);
+    console.log("🚀 Initializing session, model:", this.selectedModel);
     console.log("📋 Config:", sessionConfig);
 
     try {
       this.session = await this.client.live.connect({
-        model: this.modelName,
+        model: this.selectedModel,
         callbacks: {
           onopen: () => {
             console.log("✅ WebSocket connection successful");
@@ -290,7 +327,7 @@ export class GdmLiveAudio extends LitElement {
 
               // Calculate cost
               const costBreakdown = calculateCostInDollar(
-                this.modelName,
+                this.selectedModel,
                 tokenUsage
               );
               this.costInfo = costBreakdown;
@@ -502,9 +539,62 @@ export class GdmLiveAudio extends LitElement {
     this.updateStatus("Session has been reset.");
   }
 
+  private async changeModel(event: Event) {
+    const target = event.target as HTMLSelectElement;
+    const newModel = target.value;
+
+    if (newModel !== this.selectedModel) {
+      this.selectedModel = newModel;
+      this.updateStatus(`Switching to ${newModel}...`);
+
+      // Stop recording if active
+      if (this.isRecording) {
+        this.stopRecording();
+      }
+
+      // Close current session and reinitialize with new model
+      if (this.session) {
+        this.session.close();
+      }
+
+      // Reset session-specific data
+      this.costInfo = null;
+      this.sessionCostTotal = 0;
+      this.estimatedInputTokens = 0;
+      this.textResponses = [];
+      this.lastResponseType = "";
+      this.recordingDuration = 0;
+
+      await this.initSession();
+      this.updateStatus(`Switched to ${newModel}`);
+    }
+  }
+
   render() {
     return html`
       <div>
+        <!-- Model selector -->
+        <div id="model-selector">
+          <label for="model-select">🤖 Model:</label>
+          <select
+            id="model-select"
+            .value=${this.selectedModel}
+            @change=${this.changeModel}
+            ?disabled=${this.isRecording}
+          >
+            ${this.modelOptions.map(
+              (option) => html`
+                <option
+                  value=${option.value}
+                  ?selected=${option.value === this.selectedModel}
+                >
+                  ${option.label}
+                </option>
+              `
+            )}
+          </select>
+        </div>
+
         <!-- Display text responses -->
         ${this.textResponses.length > 0
           ? html`
