@@ -42,6 +42,10 @@ export class GdmLiveAudio extends LitElement {
   @state() recordingStartTime: number | null = null;
   @state() recordingDuration: number = 0;
   @state() selectedModel = "gemini-live-2.5-flash-preview";
+  @state() lastChunkTime: number | null = null;
+  @state() interruptedUIFlag: boolean = false;
+  private receivedAudioBuffers: AudioBuffer[] = [];
+  private chunkTimeoutId: number | null = null;
 
   private client!: GoogleGenAI;
   private session!: Session;
@@ -286,6 +290,18 @@ export class GdmLiveAudio extends LitElement {
         voiceConfig: { prebuiltVoiceConfig: { voiceName: "leda" } },
       },
       outputAudioTranscription: {},
+      // VAD 민감도 최저로 설정
+      realtimeInputConfig: {
+        automaticActivityDetection: {
+          disabled: false,
+          startOfSpeechSensitivity:
+            (window as any).StartSensitivity?.START_SENSITIVITY_LOW || 0,
+          endOfSpeechSensitivity:
+            (window as any).EndSensitivity?.END_SENSITIVITY_LOW || 0,
+          prefixPaddingMs: 20,
+          silenceDurationMs: 100,
+        },
+      },
     };
 
     if (this.systemInstruction) {
@@ -343,6 +359,24 @@ export class GdmLiveAudio extends LitElement {
               if (part.inlineData && part.inlineData.data) {
                 hasAudio = true;
 
+                // // 디버깅: 오디오 청크 정보 출력
+                // console.log("[디버그] 오디오 청크 도착:", {
+                //   dataLength: part.inlineData.data.length,
+                //   nextStartTime: this.nextStartTime,
+                //   currentTime: this.outputAudioContext.currentTime,
+                // });
+
+                // 청크 도착 시각 기록
+                this.lastChunkTime = Date.now();
+
+                // // 청크 타임아웃 리셋
+                // if (this.chunkTimeoutId) {
+                //   clearTimeout(this.chunkTimeoutId);
+                // }
+                // this.chunkTimeoutId = window.setTimeout(() => {
+                //   this.saveReceivedAudio();
+                // }, 5000); // 5초 동안 청크가 안 오면 저장
+
                 this.nextStartTime = Math.max(
                   this.nextStartTime,
                   this.outputAudioContext.currentTime
@@ -354,6 +388,7 @@ export class GdmLiveAudio extends LitElement {
                   24000,
                   1
                 );
+                this.receivedAudioBuffers.push(audioBuffer);
                 const source = this.outputAudioContext.createBufferSource();
                 source.buffer = audioBuffer;
                 source.connect(this.outputNode);
@@ -366,6 +401,11 @@ export class GdmLiveAudio extends LitElement {
                 this.sources.add(source);
               }
             }
+
+            // // 오디오 청크가 하나도 없을 때도 로그
+            // if (!hasAudio) {
+            //   console.log("[디버그] 이번 메시지에 오디오 청크 없음", message);
+            // }
 
             // Process audio transcription
             if (message.serverContent?.outputTranscription?.text) {
@@ -388,11 +428,18 @@ export class GdmLiveAudio extends LitElement {
 
             const interrupted = message.serverContent?.interrupted;
             if (interrupted) {
+              this.interruptedUIFlag = true;
+              setTimeout(() => {
+                this.interruptedUIFlag = false;
+              }, 2000);
               for (const source of this.sources.values()) {
                 source.stop();
                 this.sources.delete(source);
               }
               this.nextStartTime = 0;
+              // Gemini에서 end/interrupted 이벤트가 오면 저장
+              console.log("🔴 interrupted");
+              // this.saveReceivedAudio();
             }
           },
           onerror: (e: ErrorEvent) => {
@@ -532,6 +579,7 @@ export class GdmLiveAudio extends LitElement {
     this.textResponses = [];
     this.lastResponseType = "";
     this.recordingDuration = 0;
+    this.lastChunkTime = null; // Reset chunk time
 
     // Re-fetch system instruction if needed, or rely on stored one.
     // For simplicity, we re-initialize the session which will use the already fetched instruction.
@@ -564,9 +612,91 @@ export class GdmLiveAudio extends LitElement {
       this.textResponses = [];
       this.lastResponseType = "";
       this.recordingDuration = 0;
+      this.lastChunkTime = null; // Reset chunk time
 
       await this.initSession();
       this.updateStatus(`Switched to ${newModel}`);
+    }
+  }
+
+  // 오디오 버퍼들을 wav로 합쳐서 저장하는 함수
+  private async saveReceivedAudio() {
+    if (!this.receivedAudioBuffers.length) return;
+    // 1. 버퍼 합치기
+    const totalLength = this.receivedAudioBuffers.reduce(
+      (sum, buf) => sum + buf.length,
+      0
+    );
+    const sampleRate = 24000;
+    const merged = this.outputAudioContext.createBuffer(
+      1,
+      totalLength,
+      sampleRate
+    );
+    let offset = 0;
+    for (const buf of this.receivedAudioBuffers) {
+      merged.getChannelData(0).set(buf.getChannelData(0), offset);
+      offset += buf.length;
+    }
+    // 2. wav로 변환
+    const wavBlob = this.audioBufferToWavBlob(merged);
+    // 3. 다운로드
+    const url = URL.createObjectURL(wavBlob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `gemini_audio_${Date.now()}.wav`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 100);
+    // 4. 버퍼 초기화
+    this.receivedAudioBuffers = [];
+  }
+
+  // AudioBuffer를 wav Blob으로 변환
+  private audioBufferToWavBlob(buffer: AudioBuffer): Blob {
+    const numOfChan = buffer.numberOfChannels;
+    const length = buffer.length * numOfChan * 2 + 44;
+    const bufferArray = new ArrayBuffer(length);
+    const view = new DataView(bufferArray);
+    // RIFF chunk descriptor
+    this.writeString(view, 0, "RIFF");
+    view.setUint32(4, 36 + buffer.length * numOfChan * 2, true);
+    this.writeString(view, 8, "WAVE");
+    // FMT sub-chunk
+    this.writeString(view, 12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, numOfChan, true);
+    view.setUint32(24, buffer.sampleRate, true);
+    view.setUint32(28, buffer.sampleRate * numOfChan * 2, true);
+    view.setUint16(32, numOfChan * 2, true);
+    view.setUint16(34, 16, true);
+    // data sub-chunk
+    this.writeString(view, 36, "data");
+    view.setUint32(40, buffer.length * numOfChan * 2, true);
+    // PCM samples
+    let offset = 44;
+    for (let i = 0; i < buffer.length; i++) {
+      for (let ch = 0; ch < numOfChan; ch++) {
+        let sample = buffer.getChannelData(ch)[i];
+        sample = Math.max(-1, Math.min(1, sample));
+        view.setInt16(
+          offset,
+          sample < 0 ? sample * 0x8000 : sample * 0x7fff,
+          true
+        );
+        offset += 2;
+      }
+    }
+    return new Blob([bufferArray], { type: "audio/wav" });
+  }
+
+  private writeString(view: DataView, offset: number, str: string) {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i));
     }
   }
 
@@ -626,6 +756,15 @@ export class GdmLiveAudio extends LitElement {
             <span>Recording Time:</span>
             <span>${this.recordingDuration.toFixed(2)}s</span>
           </div>
+          <!-- 청크 수신 상태 표시 -->
+          <div class="cost-row">
+            <span>오디오 청크 상태:</span>
+            <span>
+              ${this.lastChunkTime && Date.now() - this.lastChunkTime < 2000
+                ? "🟢 청크 수신 중"
+                : "⚪️ 청크 없음"}
+            </span>
+          </div>
           ${this.costInfo
             ? html`
                 <div class="cost-row">
@@ -648,6 +787,14 @@ export class GdmLiveAudio extends LitElement {
                   <span>Est. Input Tokens:</span>
                   <span>${this.estimatedInputTokens}</span>
                 </div>
+                ${this.interruptedUIFlag
+                  ? html`<div
+                      class="cost-row"
+                      style="color:#ff4444;font-weight:bold;"
+                    >
+                      🔴 자동 감지로 오디오 중단됨 (VAD interrupted)
+                    </div>`
+                  : ""}
               `
             : html`
                 <div class="cost-row">
@@ -658,6 +805,14 @@ export class GdmLiveAudio extends LitElement {
                   <span>Est. Input Tokens:</span>
                   <span>${this.estimatedInputTokens}</span>
                 </div>
+                ${this.interruptedUIFlag
+                  ? html`<div
+                      class="cost-row"
+                      style="color:#ff4444;font-weight:bold;"
+                    >
+                      🔴 자동 감지로 오디오 중단됨 (VAD interrupted)
+                    </div>`
+                  : ""}
               `}
         </div>
 
